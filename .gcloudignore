@@ -1,0 +1,44 @@
+# This file specifies files that are *not* uploaded to Google Cloud Platform
+# using gcloud. It follows the same syntax as .gitignore, with the addition of
+# "#!include" directives (which insert the entries of the given .gitignore-style
+# file at that point).
+#
+# For more information, run:
+#   $ gcloud topic gcloudignore
+
+# Git-related files and folders
+.git
+.gitignore
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Configuration and local environment files
+.env
+.env/
+.env/*
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE/editor folders
+.vscode/
+.DS_Store
+
+# Local data folders (not needed in deployment)
+archive/
+silver/
+logs/
+
+# Output files and compressed archives
+*.zip
+
+# Optional: metadata or secrets you don’t want to upload
+youtube_metadata.json
+
+# Build system (if using setup tools)
+setup.cfg
