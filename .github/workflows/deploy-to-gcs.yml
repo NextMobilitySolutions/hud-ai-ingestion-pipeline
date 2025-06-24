@@ -1,0 +1,33 @@
+name: Deploy to GCS
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'main.py'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_KEY }}
+
+    - name: Setup Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: braided-torch-459606-c6
+        install_components: 'gsutil'
+
+    - name: Upload to GCS
+      run: |
+        gsutil cp main.py gs://svr_object_storage/code/main.py
+        gsutil cp requirements.txt gs://svr_object_storage/code/requirements.txt
