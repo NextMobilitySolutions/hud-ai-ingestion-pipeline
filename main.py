@@ -5,27 +5,11 @@ from PIL import Image
 from datetime import datetime
 import json
 import pathlib
+import argparse
+from google.cloud import storage
 
-# Rutas principales.
-ARCHIVE_PATH = "archive"
-SILVER_PATH = "raw"
-LOGS_PATH = "logs"
 ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png"]
-YOUTUBE_METADATA_PATH = "youtube_metadata.json"
-YOUTUBE_INFO = {}
 
-# Cargar metadatos si existe.
-if pathlib.Path(YOUTUBE_METADATA_PATH).is_file():
-    with open(YOUTUBE_METADATA_PATH, "r", encoding="utf-8") as f:
-        YOUTUBE_INFO = json.load(f)
-
-# Asegurarse de que los directorios existen.
-def ensure_dirs():
-    os.makedirs(SILVER_PATH, exist_ok=True)
-    os.makedirs(LOGS_PATH, exist_ok=True)
-    os.makedirs(ARCHIVE_PATH, exist_ok=True)
-
-# Verificar si el archivo es una imagen válida.
 def is_valid_image(file_bytes):
     try:
         with Image.open(io.BytesIO(file_bytes)) as img: # Open the image from bytes.
@@ -61,22 +45,26 @@ def extract_path_info(path):
 
     return dataset, scenario, split
 
+def gcs_path_join(*args):
+    return "/".join(arg.strip("/") for arg in args)
+
 # Construir la ruta completa del archivo en el directorio raw.
-def build_raw_path(dataset, scenario, split, file_name):
-    origin = detect_origin(dataset) # Detectar el origen del dataset.
+def build_raw_path(origin, dataset, scenario, split, file_name):
     if scenario: # Si hay un escenario, construir la ruta con el escenario.
-        subpath = os.path.join(origin, dataset, scenario, split)
+        subpath = f"{origin}/{dataset}/{scenario}/{split}"
     else: # Si no hay escenario, construir la ruta sin él.
-        subpath = os.path.join(origin, dataset, split)
-    return os.path.join(SILVER_PATH, subpath, file_name)
+        subpath = f"{origin}/{dataset}/{split}"
+    return f"{subpath}/{file_name}"
 
 # Procesar el archivo zip y extraer las imágenes.
-def process_zip(zip_path):
-    zip_name = os.path.basename(zip_path) # Obtener el nombre del archivo zip.
-    processed, errors = 0, [] # Contadores para imágenes procesadas y errores.
+def process_zip(zip_bytes, zip_name, bucket_name, silver_path, logs_path, youtube_metadata):
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+
+    processed, errors = 0, []
     counter = {}
 
-    with zipfile.ZipFile(zip_path, "r") as zipf: # Abrir el archivo zip.
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zipf:
         for file in zipf.namelist(): # Iterar sobre los archivos en el zip.
             # Filtrar archivos que no son imágenes o directorios.
             if file.endswith("/") or not file.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
@@ -95,21 +83,20 @@ def process_zip(zip_path):
                 if not is_valid_image(content):
                     raise Exception("Archivo no es imagen válida")
 
-                dest_path = build_raw_path(dataset, scenario, split, new_name) # Construir la ruta completa del archivo en el directorio raw.
+                origin = detect_origin(dataset)
+                gcs_path = gcs_path_join(silver_path, build_raw_path(origin, dataset, scenario, split, new_name))
 
-                # Asegurarse de que la ruta de destino no exista, si existe, renombrar.
-                base, ext = os.path.splitext(dest_path)
-                duplicate_count = 1
-                while os.path.exists(dest_path):
-                    dest_path = f"{base}_{duplicate_count}{ext}"
-                    duplicate_count += 1
+                # Subir al bucket
+                blob = bucket.blob(gcs_path)
+                if blob.exists():
+                    base, ext = os.path.splitext(gcs_path)
+                    i = 1
+                    while bucket.blob(f"{base}_{i}{ext}").exists():
+                        i += 1
+                    gcs_path = f"{base}_{i}{ext}"
+                    blob = bucket.blob(gcs_path)
 
-                # Crear el directorio si no existe y guardar el archivo.
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                with open(dest_path, "wb") as out_file:
-                    out_file.write(content)
-
-                # Registrar el archivo procesado.
+                blob.upload_from_string(content)
                 processed += 1
 
             except Exception as e:
@@ -124,25 +111,38 @@ def process_zip(zip_path):
     }
 
     # Añadir metadatos de YouTube si el .zip coincide con una entrada del diccionario.
-    if zip_name in YOUTUBE_INFO:
-        log["youtube_metadata"] = {
-            "video_name": zip_name,
-            "video_url": YOUTUBE_INFO[zip_name]["video_url"],
-            "video_title": YOUTUBE_INFO[zip_name]["video_title"],
-            "description": YOUTUBE_INFO[zip_name].get("description", "")
-        }
+    if zip_name in youtube_metadata:
+        log["youtube_metadata"] = youtube_metadata[zip_name]
 
-    log_name = os.path.join(LOGS_PATH, f"log_{zip_name}.json")
-    with open(log_name, "w", encoding="utf-8") as f:
-        json.dump(log, f, indent=2, ensure_ascii=False)
+    log_blob = bucket.blob(os.path.join(logs_path, f"log_{zip_name}.json"))
+    log_blob.upload_from_string(json.dumps(log, indent=2, ensure_ascii=False), content_type='application/json')
 
     print(f"[SUCCESS] {zip_name} procesado: {processed} imágenes | {len(errors)} errores")
 
 def main():
-    ensure_dirs()
-    for zip_file in os.listdir(ARCHIVE_PATH):
-        if zip_file.endswith(".zip"):
-            process_zip(os.path.join(ARCHIVE_PATH, zip_file))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--zip_path", required=True, help="Ruta al archivo .zip en GCS (gs://...)")
+    parser.add_argument("--bucket_name", required=True, help="Nombre del bucket de GCS")
+    parser.add_argument("--silver_path", required=True, help="Ruta base destino de imágenes en GCS")
+    parser.add_argument("--logs_path", required=True, help="Ruta de logs en GCS")
+    parser.add_argument("--youtube_metadata_path", default="youtube_metadata.json")
+    args = parser.parse_args()
+
+    # Cargar metadatos
+    youtube_metadata = {}
+    if pathlib.Path(args.youtube_metadata_path).is_file():
+        with open(args.youtube_metadata_path, "r", encoding="utf-8") as f:
+            youtube_metadata = json.load(f)
+
+    # Descargar ZIP desde GCS
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(args.bucket_name)
+    zip_blob = bucket.blob(args.zip_path.replace(f"gs://{args.bucket_name}/", ""))
+    zip_bytes = zip_blob.download_as_bytes()
+    zip_name = os.path.basename(args.zip_path)
+
+    # Procesar
+    process_zip(zip_bytes, zip_name, args.bucket_name, args.silver_path, args.logs_path, youtube_metadata)
 
 if __name__ == "__main__":
     main()
