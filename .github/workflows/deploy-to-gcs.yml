@@ -6,6 +6,7 @@ on:
     paths:
       - 'main.py'
       - 'requirements.txt'
+      - 'config/youtube_metadata.json'
   workflow_dispatch:
 
 jobs:
@@ -31,3 +32,4 @@ jobs:
       run: |
         gsutil cp main.py gs://svr_object_storage/code/main.py
         gsutil cp requirements.txt gs://svr_object_storage/code/requirements.txt
+        gsutil cp config/youtube_metadata.json gs://svr_object_storage/archive/config/youtube_metadata.json  # 👈 Nuevo
