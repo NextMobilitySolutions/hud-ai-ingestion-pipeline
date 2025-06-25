@@ -125,17 +125,29 @@ def main():
     parser.add_argument("--bucket_name", required=True, help="Nombre del bucket de GCS")
     parser.add_argument("--silver_path", required=True, help="Ruta base destino de imágenes en GCS")
     parser.add_argument("--logs_path", required=True, help="Ruta de logs en GCS")
-    parser.add_argument("--youtube_metadata_path", default="youtube_metadata.json")
+    parser.add_argument("--youtube_metadata_path", default="youtube_metadata.json", help="Ruta al archivo JSON con metadatos (local o GCS)")
     args = parser.parse_args()
+
+    storage_client = storage.Client()
 
     # Cargar metadatos
     youtube_metadata = {}
-    if pathlib.Path(args.youtube_metadata_path).is_file():
+    if args.youtube_metadata_path.startswith("gs://"):
+        # Leer metadata desde GCS
+        path_parts = args.youtube_metadata_path.replace("gs://", "").split("/", 1)
+        metadata_bucket = storage_client.bucket(path_parts[0])
+        metadata_blob = metadata_bucket.blob(path_parts[1])
+        if metadata_blob.exists():
+            metadata_bytes = metadata_blob.download_as_bytes()
+            youtube_metadata = json.loads(metadata_bytes.decode("utf-8"))
+        else:
+            print(f"[WARNING] Metadata file not found: {args.youtube_metadata_path}")
+    elif os.path.isfile(args.youtube_metadata_path):
+        # Leer metadata desde archivo local
         with open(args.youtube_metadata_path, "r", encoding="utf-8") as f:
             youtube_metadata = json.load(f)
 
     # Descargar ZIP desde GCS
-    storage_client = storage.Client()
     bucket = storage_client.bucket(args.bucket_name)
     zip_blob = bucket.blob(args.zip_path.replace(f"gs://{args.bucket_name}/", ""))
     zip_bytes = zip_blob.download_as_bytes()
