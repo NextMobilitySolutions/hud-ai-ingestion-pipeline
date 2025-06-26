@@ -89,12 +89,8 @@ def process_zip(zip_bytes, zip_name, bucket_name, silver_path, logs_path, youtub
                 # Subir al bucket
                 blob = bucket.blob(gcs_path)
                 if blob.exists():
-                    base, ext = os.path.splitext(gcs_path)
-                    i = 1
-                    while bucket.blob(f"{base}_{i}{ext}").exists():
-                        i += 1
-                    gcs_path = f"{base}_{i}{ext}"
-                    blob = bucket.blob(gcs_path)
+                    errors.append(f"{file}: skipped — file already exists in GCS as {gcs_path}")
+                    continue  # Saltar este archivo, ya está en GCS
 
                 blob.upload_from_string(content)
                 processed += 1
