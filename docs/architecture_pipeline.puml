@@ -1,0 +1,25 @@
+@startuml architecture_pipeline
+start
+
+:Subida de archivo ZIP;
+:Almacenamiento en bucket GCS (archive/);
+
+partition CloudFunction {
+  :Trigger por evento finalize;
+  :Llamada a función Cloud Function (Gen1);
+}
+
+partition Dataproc {
+  :Lanzamiento de Job Spark en Dataproc;
+  :Procesamiento de imágenes:
+  - Validación
+  - Renombrado
+  - Reorganización por carpeta;
+  :Escritura de log de procesamiento (JSON);
+}
+
+:Archivos procesados a raw/public/;
+:Logs guardados en logs/;
+
+stop
+@enduml

@@ -1,69 +1,96 @@
-# **Entorno local de pruebas para procesamiento automático de archivos `.zip`**
+# **HUD AI Ingestion Pipeline**
 
-Este repositorio contiene una versión local del sistema de procesamiento automático de imágenes comprimidas en archivos `.zip`, pensada para **realizar pruebas, desarrollos y validaciones sin necesidad de desplegar en Google Cloud**.
+Este repositorio implementa un sistema automatizado de ingestión y procesamiento de archivos `.zip` que contienen imágenes para entrenamiento de modelos de visión artificial. Está diseñado para ejecutarse sobre Google Cloud Platform (GCP), combinando almacenamiento en GCS, ejecución distribuida con Dataproc (Apache Spark) y automatización mediante Cloud Functions.
 
-> La rama `main` está destinada al entorno **de producción** y contiene el código adaptado para funcionar como una Google Cloud Function conectada al bucket `gs://svr_object_storage/`.
+El flujo permite subir archivos comprimidos al bucket `gs://svr_object_storage/archive/`, y lanza automáticamente un job de Spark para validar, reorganizar y registrar las imágenes en la estructura definida.
 
-## **Funcionamiento del sistema**
-
-Este flujo local simula lo que realiza la función en la nube:
-
-1. **Lee archivos `.zip` desde la carpeta `archive/`**
-2. **Descomprime su contenido**
-3. **Valida y renombra imágenes según estructura esperada**
-4. **Reorganiza las imágenes en la carpeta `silver/`**
-5. **Registra un log del procesamiento en `logs/`**
-
-## **Estructura del proyecto**
+## **Estructura del repositorio**
 
 ```plaintext
 .
-├── archive/            # Carpeta donde se colocan los archivos ZIP a procesar
-├── raw/                # Carpeta de salida con las imágenes organizadas
-├── logs/               # Logs generados automáticamente por cada ZIP procesado
-├── main.py             # Código fuente (validador, renombrador, extractor)
-├── requirements.txt    # Dependencias necesarias para ejecución local
-├── .gcloudignore       # Reglas para despliegue en la nube (no aplica en local)
-├── .gitignore
-├── README.md
-└── ZIP_ingestion_guidelines.md   # Normativa sobre la estructura de los `.zip`
+├── .github/workflows/
+│   └── deploy-to-gcs.yml             # Workflow para sincronización automática con GCS
+├── cloud_function/
+│   ├── main.py                       # Cloud Function que lanza jobs en Dataproc
+│   └── requirements.txt              # Dependencias necesarias para la función
+├── config/
+│   └── youtube_metadata.json         # Metadatos adicionales para datasets provenientes de vídeo
+├── .gcloudignore                     # Archivos ignorados en despliegues GCP
+├── .gitignore                        # Archivos ignorados por Git
+├── LICENSE                           # Licencia Apache 2.0
+├── README.md                         # Documentación técnica del proyecto
+├── ZIP_ingestion_guidelines.md       # Guía para la estructuración correcta de archivos `.zip`
+├── main.py                           # Script principal de procesamiento (Spark)
+├── requirements.txt                  # Dependencias para ejecución local o en Dataproc
 ```
 
-## **Ejecución local**
+## **Arquitectura funcional del sistema**
 
-1. Crea y activa un entorno virtual:
+El siguiente diagrama ilustra el flujo automatizado de ingestión y procesamiento de archivos `.zip` en la infraestructura del proyecto HUD AI. Este pipeline está diseñado para operar de forma desatendida sobre Google Cloud Platform, desde la subida inicial del archivo hasta el registro final del procesamiento. La arquitectura contempla detección de eventos, ejecución distribuida y trazabilidad completa, garantizando escalabilidad, eficiencia y control de calidad en cada etapa.
 
-    ```bash
-    python -m venv venv
-    source venv/bin/activate   # o venv\Scripts\activate en Windows
-    ```
+![Arquitectura del sistema](./docs/architecture_pipeline.png)
 
-2. Instala las dependencias:
+## **Bucket principal y estructura de carpetas**
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+Bucket: `gs://svr_object_storage`
 
-3. Ejecuta el procesamiento:
+```plaintext
+gs://svr_object_storage/
+├── archive/              # Entrada: ZIPs subidos manual o programáticamente
+├── raw/                  # Salida: imágenes reorganizadas y validadas
+├── logs/                 # Archivos JSON con trazabilidad por cada ZIP procesado
+├── code/                 # Código sincronizado desde GitHub (main.py, requirements.txt)
+```
 
-    ```bash
-    python main.py
-    ```
+## **Reglas para los archivos `.zip`**
 
-Esto procesará todos los archivos `.zip` encontrados en la carpeta `archive/`.
+Los archivos comprimidos deben contener rutas estructuradas según la siguiente convención:
 
-## **Reglas para los `.zip`**
+```plaintext
+[dataset]/[escenario]/[split]/[imagen]
+```
 
-Toda la normativa relativa a la estructura de los `.zip` y las convenciones del sistema se encuentra descrita en el archivo:
+Valores aceptados:
 
-[`ZIP_ingestion_guidelines.md`](./ZIP_ingestion_guidelines.md)
+* `split`: `train`, `val`, `test` o `unknown`
+* `escenario`: niebla, noche, curva, etc. (o `unknown`)
+* Imágenes aceptadas: `.jpg`, `.jpeg`, `.png`
 
-## **Importante**
+Documentación completa disponible en [`ZIP_ingestion_guidelines.md`](./docs/ZIP_ingestion_guidelines.md).
 
-* Este entorno **no sube nada a Google Cloud**.
-* Está pensado para validar datos, debuggear errores y verificar transformaciones antes de integrarlo en el pipeline real.
-* La versión **oficial en producción** se encuentra en la rama `main`, conectada al bucket `gs://svr_object_storage/` y desplegada como Cloud Function.
+## **Cloud Function (Gen1)**
 
-## **Contacto**
+La función desplegada se activa con eventos tipo `google.storage.object.finalize` sobre el bucket `archive/`. Lanza un job en Dataproc pasando los argumentos necesarios:
 
-Para dudas técnicas, mejoras o errores detectados, puedes abrir un *Issue* o contactar con el responsable del entorno de ingestión.
+* `--zip_path`
+* `--bucket_name`
+* `--silver_path`
+* `--logs_path`
+
+La función incorpora control de duplicados, verificando si existe un archivo `logs/log_<nombre>.json` antes de lanzar el job.
+
+## **Script de procesamiento en Spark**
+
+El archivo `main.py` está adaptado para ejecución en Dataproc y acepta argumentos mediante `argparse`. Funcionalidad principal:
+
+* Acceso directo al ZIP desde GCS
+* Descompresión en memoria
+* Validación y renombrado de imágenes
+* Organización en rutas tipo `raw/public/dataset/escenario/split/`
+* Generación de log estructurado en `logs/`
+
+## **Automatización con GitHub Actions**
+
+El repositorio incluye un flujo de trabajo automático (`.github/workflows/deploy-to-gcs.yml`) que sincroniza los archivos `main.py` y `requirements.txt` a la carpeta `code/` del bucket de GCS al realizar `push` sobre `main`.
+
+## **Estado actual del sistema**
+
+* Repositorio estructurado por ramas (`main` y `dev`)
+* Cloud Function Gen1 operativa y desplegada
+* Clúster Dataproc activo en región `us-central1`
+* Código sincronizado mediante GitHub Actions
+* Validación funcional completa con control de duplicados
+
+## **Licencia**
+
+Este proyecto está licenciado bajo los términos de la licencia Apache 2.0. Consultar el archivo `LICENSE` para más información.
