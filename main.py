@@ -7,6 +7,7 @@ import json
 import pathlib
 import argparse
 from google.cloud import storage
+from google.cloud.exceptions import NotFound
 
 ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png"]
 
@@ -63,40 +64,42 @@ def process_zip(zip_bytes, zip_name, bucket_name, silver_path, logs_path, youtub
 
     processed, errors = 0, []
     counter = {}
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zipf:
+            for file in zipf.namelist(): # Iterar sobre los archivos en el zip.
+                # Filtrar archivos que no son imágenes o directorios.
+                if file.endswith("/") or not file.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
+                    continue
 
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zipf:
-        for file in zipf.namelist(): # Iterar sobre los archivos en el zip.
-            # Filtrar archivos que no son imágenes o directorios.
-            if file.endswith("/") or not file.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
-                continue
+                # Extraer información del path del archivo.
+                try:
+                    dataset, scenario, split = extract_path_info(file) # Extraer dataset, escenario y split.
+                    key = f"{dataset}_{scenario or 'none'}_{split}" # Crear una clave única para el archivo.
+                    counter[key] = counter.get(key, 0) + 1 # Contador para evitar duplicados.
 
-            # Extraer información del path del archivo.
-            try:
-                dataset, scenario, split = extract_path_info(file) # Extraer dataset, escenario y split.
-                key = f"{dataset}_{scenario or 'none'}_{split}" # Crear una clave única para el archivo.
-                counter[key] = counter.get(key, 0) + 1 # Contador para evitar duplicados.
+                    ext = os.path.splitext(file)[-1].lower() # Obtener la extensión del archivo.
+                    new_name = f"{key}_{counter[key]:05d}{ext}" # Renombrar el archivo con la clave y un contador.
+                    content = zipf.read(file) # Leer el contenido del archivo.
 
-                ext = os.path.splitext(file)[-1].lower() # Obtener la extensión del archivo.
-                new_name = f"{key}_{counter[key]:05d}{ext}" # Renombrar el archivo con la clave y un contador.
-                content = zipf.read(file) # Leer el contenido del archivo.
+                    if not is_valid_image(content):
+                        raise Exception("Archivo no es imagen válida")
 
-                if not is_valid_image(content):
-                    raise Exception("Archivo no es imagen válida")
+                    origin = detect_origin(dataset)
+                    gcs_path = gcs_path_join(silver_path, build_raw_path(origin, dataset, scenario, split, new_name))
 
-                origin = detect_origin(dataset)
-                gcs_path = gcs_path_join(silver_path, build_raw_path(origin, dataset, scenario, split, new_name))
+                    # Subir al bucket
+                    blob = bucket.blob(gcs_path)
+                    if blob.exists():
+                        errors.append(f"{file}: skipped — file already exists in GCS as {gcs_path}")
+                        continue  # Saltar este archivo, ya está en GCS
 
-                # Subir al bucket
-                blob = bucket.blob(gcs_path)
-                if blob.exists():
-                    errors.append(f"{file}: skipped — file already exists in GCS as {gcs_path}")
-                    continue  # Saltar este archivo, ya está en GCS
+                    blob.upload_from_string(content)
+                    processed += 1
 
-                blob.upload_from_string(content)
-                processed += 1
-
-            except Exception as e:
-                errors.append(f"{file}: {str(e)}")
+                except Exception as e:
+                    errors.append(f"{file}: {str(e)}")
+    except zipfile.BadZipFile:
+        raise Exception(f"[EXCEPTION] ZIP file is corrupted or invalid: {zip_name}")
 
     # Crear el log de procesamiento.
     log = {
@@ -113,7 +116,7 @@ def process_zip(zip_bytes, zip_name, bucket_name, silver_path, logs_path, youtub
     log_blob = bucket.blob(os.path.join(logs_path, f"log_{zip_name}.json"))
     log_blob.upload_from_string(json.dumps(log, indent=2, ensure_ascii=False), content_type='application/json')
 
-    print(f"[SUCCESS] {zip_name} procesado: {processed} imágenes | {len(errors)} errores")
+    print(f"[SUCCESS] {zip_name} process: {processed} images | {len(errors)} errors")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -146,7 +149,10 @@ def main():
     # Descargar ZIP desde GCS
     bucket = storage_client.bucket(args.bucket_name)
     zip_blob = bucket.blob(args.zip_path.replace(f"gs://{args.bucket_name}/", ""))
-    zip_bytes = zip_blob.download_as_bytes()
+    try:
+        zip_bytes = zip_blob.download_as_bytes()
+    except NotFound:
+        raise Exception(f"[EXCEPTION] ZIP file not found in GCS: {args.zip_path}")
     zip_name = os.path.basename(args.zip_path)
 
     # Procesar
