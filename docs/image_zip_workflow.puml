@@ -1,0 +1,47 @@
+@startuml Image ZIP Processing Workflow
+
+start
+:Start program;
+
+:Ensure folders exist\n("archive", "raw", "logs");
+
+repeat
+  :Scan files in "archive";
+  if (File ends with ".zip"?) then (yes)
+    :Open ZIP;
+    repeat
+      :Iterate files inside ZIP;
+      if (File is an image?\n.jpg / .jpeg / .png) then (yes)
+        :Validate image;
+        if (Valid image?) then (yes)
+          :Extract path info:\n- dataset\n- scenario (optional)\n- split (train/val/test/unknown);
+          if (dataset == "carla"?) then (yes)
+            :Origin = "simulated";
+          else (no)
+            :Origin = "public";
+          endif
+          :Build destination folder:\nraw / origin / dataset / (scenario) / split;
+          :Save image with orderly name;
+          :+1 processed;
+        else (no)
+          :Add to error list;
+        endif
+      else (no)
+        :Ignore file;
+      endif
+    repeat while (More files?) is (yes)
+
+    :Create log (JSON):\n- zip name\n- date/time\n- processed count\n- errors;
+    if (ZIP has YouTube metadata?) then (yes)
+      :Add YouTube info\n(title, url, description);
+    else (no)
+    endif
+    :Save log in "logs";
+    :Show summary on screen;
+  else (no)
+    :Skip file;
+  endif
+repeat while (More files?) is (yes)
+
+stop
+@enduml

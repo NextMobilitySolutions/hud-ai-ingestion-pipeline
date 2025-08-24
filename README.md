@@ -2,7 +2,7 @@
 
 Este repositorio contiene una versión local del sistema de procesamiento automático de imágenes comprimidas en archivos `.zip`, pensada para **realizar pruebas, desarrollos y validaciones sin necesidad de desplegar en Google Cloud**.
 
-> La rama `main` está destinada al entorno **de producción** y contiene el código adaptado para funcionar como una Google Cloud Function conectada al bucket `gs://svr_object_storage/`.
+> La rama `main` está destinada al entorno **de producción** y contiene el código adaptado para conectarlo al bucket `gs://svr_object_storage/`.
 
 ## **Funcionamiento del sistema**
 
@@ -11,8 +11,12 @@ Este flujo local simula lo que realiza la función en la nube:
 1. **Lee archivos `.zip` desde la carpeta `archive/`**
 2. **Descomprime su contenido**
 3. **Valida y renombra imágenes según estructura esperada**
-4. **Reorganiza las imágenes en la carpeta `silver/`**
+4. **Reorganiza las imágenes en la carpeta `raw/`**
 5. **Registra un log del procesamiento en `logs/`**
+
+### Diagrama del flujo de procesamiento
+
+![Image ZIP Processing Workflow](docs/image_zip_workflow.png)
 
 ## **Estructura del proyecto**
 
@@ -21,12 +25,14 @@ Este flujo local simula lo que realiza la función en la nube:
 ├── archive/            # Carpeta donde se colocan los archivos ZIP a procesar
 ├── raw/                # Carpeta de salida con las imágenes organizadas
 ├── logs/               # Logs generados automáticamente por cada ZIP procesado
+├── docs/
+    ├── image_zip_workflow.png        # Diagrama del flujo de procesamiento
+    └── ZIP_ingestion_guidelines.md   # Normativa sobre la estructura de los `.zip`
 ├── main.py             # Código fuente (validador, renombrador, extractor)
 ├── requirements.txt    # Dependencias necesarias para ejecución local
 ├── .gcloudignore       # Reglas para despliegue en la nube (no aplica en local)
 ├── .gitignore
-├── README.md
-└── ZIP_ingestion_guidelines.md   # Normativa sobre la estructura de los `.zip`
+└── README.md
 ```
 
 ## **Ejecución local**
@@ -56,13 +62,12 @@ Esto procesará todos los archivos `.zip` encontrados en la carpeta `archive/`.
 
 Toda la normativa relativa a la estructura de los `.zip` y las convenciones del sistema se encuentra descrita en el archivo:
 
-[`ZIP_ingestion_guidelines.md`](./ZIP_ingestion_guidelines.md)
+[`ZIP_ingestion_guidelines.md`](docs/ZIP_ingestion_guidelines.md)
 
 ## **Importante**
 
 * Este entorno **no sube nada a Google Cloud**.
 * Está pensado para validar datos, debuggear errores y verificar transformaciones antes de integrarlo en el pipeline real.
-* La versión **oficial en producción** se encuentra en la rama `main`, conectada al bucket `gs://svr_object_storage/` y desplegada como Cloud Function.
 
 ## **Contacto**
 

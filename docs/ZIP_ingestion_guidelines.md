@@ -66,7 +66,7 @@ Todo archivo comprimido en formato `.zip` que se cargue en el bucket `archive/` 
 Una vez procesado correctamente, cada imagen será reorganizada en el bucket de destino bajo la siguiente ruta:
 
 ```plaintext
-silver/[origen]/[dataset]/[escenario]/[split]/[imagen]
+raw/[origen]/[dataset]/[escenario]/[split]/[imagen]
 ```
 
 Además, será renombrada siguiendo este formato normativo:
