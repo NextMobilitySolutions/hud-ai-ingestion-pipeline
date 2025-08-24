@@ -1,6 +1,7 @@
 # Only for test, because is very big file.
 raw/
 archive/
+outputs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

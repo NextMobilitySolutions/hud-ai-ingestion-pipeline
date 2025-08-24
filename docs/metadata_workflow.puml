@@ -1,0 +1,34 @@
+@startuml Image Metadata Collector
+
+start
+:Look at folder "raw/";
+if ("Folder exists?") then (No)
+  :Stop with error;
+  stop
+else (Yes)
+  :Create "outputs" folder;
+endif
+
+repeat
+  :Take next file;
+  if ("Is it an image?") then (No)
+    :Skip file;
+  else (Yes)
+    :Get size (width, height);
+    :Compute SHA-256 fingerprint;
+    :Get dataset / scenario / split;
+    :Save info into memory;
+    if ("500 files collected?") then (Yes)
+      :Write rows to CSV;
+      :Clear memory;
+    endif
+  endif
+repeat while (More files)
+
+if ("Leftover rows?") then (Yes)
+  :Write them to CSV;
+endif
+
+:Show summary message;
+stop
+@enduml
